@@ -1,0 +1,587 @@
+--- C:/Users/makbar/Desktop/Muhammad-Docs/Personal/new/submission/code/objcopy/objcopy.c.orig	Mon Jun 27 02:39:10 2011
++++ C:/Users/makbar/Desktop/Muhammad-Docs/Personal/new/submission/code/objcopy/objcopy.c	Tue Nov 15 10:25:42 2011
+@@ -42,0 +43,4 @@
++/* maa2206 - ISR - BEGIN */
++#include <ctype.h> //for isspace() in trim()
++/* maa2206 - ISR - END */
++
+@@ -79,0 +84,54 @@
++/* maa2206 - ISR - BEGIN */
++
++char* OBJRAND_VER_STRING = "3.1";
++/* Maximum amount of slice-to-ISR key pairings to keep track of */
++#define MAX_SK_MAP_LENGTH        10
++#define OBFUSCATE(from, isr_xor_key) (from ^ isr_xor_key)
++/** 
++ * A mapping between a program slice (address range) and an ISR key.
++ * We load an array of these from the configuration file.
++ */
++typedef struct _slice_key_tuple
++{
++   unsigned int entry_num;   //index position in the collection of tuples
++   char* function_name;      //name of the function the slice occurs in
++   u_int32_t start_address;  //address to start randomizing instr content
++   u_int32_t end_address;    //address to stop randomizing instr content
++   u_int16_t isr_key;        //ISR key for the slice
++   char* tagnote;            //optional string note
++} SliceKeyTuple;
++
++/* Read $STEM_CONF/objrand.conf into this array. Consult this array
++ * during binary section copying. Base the consulatation on start and
++ * end address, not necessarily function name.  The function name just
++ * gives a hint for auditing and debugging, but because emulate* tags
++ * can be abitrarily placed in the source, function names don't tell
++ * us much.
++ */
++static SliceKeyTuple slice_keys[MAX_SK_MAP_LENGTH] = 
++{
++   //{0, "foobar", 0x08048262, 0x08048270, 0x0, "internal_tag"},
++   {0, "", 0x0, 0x0, 0x0, ""},
++   {1, "", 0x0, 0x0, 0x0, ""},
++   {2, "", 0x0, 0x0, 0x0, ""},
++   {3, "", 0x0, 0x0, 0x0, ""},
++   {4, "", 0x0, 0x0, 0x0, ""},
++   {5, "", 0x0, 0x0, 0x0, ""},
++   {6, "", 0x0, 0x0, 0x0, ""},
++   {7, "", 0x0, 0x0, 0x0, ""},
++   {8, "", 0x0, 0x0, 0x0, ""},
++   {9, "", 0x0, 0x0, 0x0, ""},
++   //10 is all MAX_SK_MAP_LENGTH allows for now...
++};
++
++/** Handle to the configuration file containing SKTuples */
++FILE* isr_configfile = NULL;
++unsigned int isr_encrypt_whole_image = 0; //false
++enum isr_config_parse_result
++{
++   PARSE_OK = 1,
++   PARSE_FAILED = 0
++};
++
++/* maa2206 - ISR - END */
++
+@@ -165,0 +224,5 @@
++/* maa2206 - ISR - BEGIN */
++/* XOR key for encryption */
++static u_int16_t encrypt_xor_key = 0x0;
++/* maa2206 - ISR - END */
++
+@@ -308,0 +372,4 @@
++/* maa2206 - ISR - BEGIN */
++    OPTION_ENC_XOR_KEY,
++    OPTION_ISR_CONF,
++/* maa2206 - ISR - END */
+@@ -317 +384 @@
+-    OPTION_SUBSYSTEM
++    OPTION_SUBSYSTEM,
+@@ -433,0 +501,4 @@
++/* maa2206 - ISR - BEGIN */
++  {"encrypt-xor-key", required_argument, 0, OPTION_ENC_XOR_KEY},
++  {"isr-conf", required_argument, 0, OPTION_ISR_CONF},
++/* maa2206 - ISR - END */
+@@ -469 +540,135 @@
+-
++
++/* maa2206 - ISR - BEGIN */
++static char* trim(char* s);
++//static void dumpSliceKeysTable(void);
++/** 
++ * Determine the ISR key to use for this address.  Caller is
++ * responsible for allocation of skpair memory.
++ */
++SliceKeyTuple* getSKPair(unsigned long address, SliceKeyTuple* skpair);
++/**
++ * Read the contents of isr_cfg_file into slice_keys array. Returns
++ * zero (false) if anything goes wrong, one (true) if parsing and
++ * loading completed successfully.
++ */
++unsigned int readISRConfigFile(FILE* isr_cfg_file);
++
++/*static void dumpSliceKeysTable(void)
++{
++   int i = 0;
++   for(i=0;i<MAX_SK_MAP_LENGTH;i++)
++   {
++      fprintf(stderr,
++              "slice_keys[%d].start_address = 0x%x\n",
++              slice_keys[i].entry_num,
++              slice_keys[i].start_address);
++      fprintf(stderr,
++              "slice_keys[%d].end_address = 0x%x\n",
++              i,
++              slice_keys[i].end_address);
++      fprintf(stderr,
++              "slice_keys[%d].isr_key = 0x%x\n",
++              i,
++              slice_keys[i].isr_key);
++      fprintf(stderr, "\n");
++   }
++}*/
++
++static char* trim(char* s)
++{
++   char c;
++   int data_is_whitespace = 1; // TRUE
++   char * result = NULL;
++   unsigned int result_length = 0;
++   char* r;
++   int last_front_space_pos = 0;
++   int first_back_space_pos = strlen(s);
++
++   for(r=s;r!='\0' && data_is_whitespace; r++)
++   {
++      c = *r;
++      data_is_whitespace = isspace((int)c);
++      if(data_is_whitespace)
++         last_front_space_pos++;
++   }
++
++   data_is_whitespace = 1; //reset to TRUE
++   r = s + strlen(s); //pointer arithmetic, goto end - NULL term, if any
++   --r;
++   for(;r!=s && data_is_whitespace;r--)
++   {
++      c = *r;
++      data_is_whitespace = isspace((int)c);
++      if(data_is_whitespace)
++         first_back_space_pos--;
++   }
++
++   result_length = first_back_space_pos - last_front_space_pos;
++   result = (char*)malloc(result_length+1);
++   if(NULL==result)
++   {
++      fprintf(stderr, "objrand:  cannot create trimmed result\n");
++      return NULL;
++   }
++   memcpy(result, s+last_front_space_pos, result_length);
++   result[result_length] = '\0';
++   return result;
++}
++
++/** 
++ * Determine the ISR key to use for this address.  The implementation
++ * is quite simplistic. It simply does a linear sweep of the
++ * 'slice_keys' array and returns the first-found entry that has a
++ * start_address and end_address interval containing the 'address'
++ * parameter. Caller is responsible for allocation of skpair memory.
++ */
++SliceKeyTuple* 
++getSKPair(unsigned long address,
++          SliceKeyTuple* skpair)
++{
++   int i = 0;
++   int found = 0; //false
++
++   if(NULL==skpair)
++      return NULL;
++
++   //fprintf(stderr, "getSKPair(0x%x,...)\n", address);
++
++   for(i=0; i<MAX_SK_MAP_LENGTH; i++)
++   {
++      //if entry is not valid, continue (skip entry)
++      if(0x0==slice_keys[i].start_address &&
++         0x0==slice_keys[i].end_address)
++         continue;
++
++      if(slice_keys[i].start_address<=address &&
++         slice_keys[i].end_address>=address)
++      {
++         //found an appropriate interval
++         found = 1;
++         //load skpair with the data from slice_keys[i]
++         skpair->start_address = slice_keys[i].start_address;
++         skpair->end_address = slice_keys[i].end_address;
++         skpair->isr_key = slice_keys[i].isr_key;
++
++         fprintf(stderr, "address 0x%lx found in [0x%x, 0x%x] with key %x\n",
++                 address,
++                 skpair->start_address,
++                 skpair->end_address,
++                 skpair->isr_key);
++
++         skpair->entry_num = slice_keys[i].entry_num; // ==i
++         //skip tagnote and function_name. it's a bother to alloc mem
++         break;
++      }
++   }
++   if(1==found)
++   {
++      return skpair;
++   }else{
++      return NULL;
++   }
++}
++
++/* maa2206 - ISR - END */
++
+@@ -551,0 +757,4 @@
++"/* maa2206 - ISR - BEGIN */"\
++     --encrypt-xor-key <key>       Encrypt the whole binary with <key>. <key> can be in hex format (e.g., 0xDEADBEEF)\n\
++     --isr-conf <file>             Read the program slice -> ISR key records from configuration file <file>\n\
++"/* maa2206 - ISR - END */"\
+@@ -2717,0 +2927,88 @@
++      /* maa2206 - ISR - BEGIN */
++     /* XOR the instruction content at a certain address range */
++      if (((isection->flags & SEC_LOAD) == 0) ||
++          ((isection->flags & SEC_CODE) == 0))
++      {
++         //do NOTHING
++#if 1
++         fprintf(stderr, "skipping section %d (%d/%s) vm addr is: ", 
++                 isection->index,
++                 isection->id,
++                 isection->name);
++         fprintf_vma(stderr, isection->vma);
++         fprintf(stderr, "\n");
++#endif
++      }else{
++         SliceKeyTuple skpair;
++         bfd_vma vm_address = 0; //"typedef unsigned long bfd_vma"
++         skpair.function_name = "";
++         skpair.isr_key = 0x0;
++         skpair.start_address = 0x0;
++         skpair.end_address = 0x0;
++         skpair.tagnote = "";
++         unsigned long instr_randomized = 0;
++         // memhunk[0] is at isection->vma
++         vm_address = isection->vma; //runtime virt mem addr of section start
++#if 1
++         fprintf(stderr, "section %d (%d/%s) vm addr is: ", 
++                 isection->index,
++                 isection->id,
++                 isection->name);
++         fprintf_vma(stderr, vm_address);
++         fprintf(stderr, "\n");
++#endif
++         
++         if(1==isr_encrypt_whole_image)
++         {
++            u_int16_t *from = (u_int16_t *) memhunk;
++            u_int16_t *to = (u_int16_t *) memhunk;
++            /* there are 'size' bytes in this section */ 
++            u_int16_t *end = (u_int16_t *)((u_int8_t *)memhunk + (size & ~0x1));
++            for (; from < end; ) {
++		    instr_randomized += 2;
++		    *to++ = OBFUSCATE(*from++, encrypt_xor_key);
++	    }
++	    if (instr_randomized != size) {
++		    *(u_int8_t *)to = OBFUSCATE(*(u_int8_t *)from,
++				    (u_int8_t)encrypt_xor_key);
++		    instr_randomized++;
++	    }
++         }else{
++            //selective randomization according to slice_keys table
++            u_int8_t *from = memhunk;
++            u_int8_t *to = memhunk;
++            /* there are 'size' bytes in this section */ 
++            u_int8_t *end = memhunk + size - 1;
++
++            for(; from<end; )
++            {
++               //order of operations is important in this if() conditional
++               if(NULL==getSKPair(vm_address, &skpair) ||
++                  ((0x0==skpair.start_address) && (0x0==skpair.end_address)))
++               {
++                  //do not randomize, but copy
++                  *to++ = *from++;
++                  //*to++ = OBFUSCATE(*from++, 0x0);
++               }else{
++                  *to++ = OBFUSCATE(*from++, skpair.isr_key);
++                  instr_randomized++;
++               }
++               vm_address += sizeof(u_int8_t); //increment by 1
++            }
++         }
++         //should randomize (start-end + 1) bytes in selective case
++         // 68 bytes for cat.c
++         //problem: hard to stop on instruction boundary
++         //solution: from and to are uint16, but we need to test on a byte
++         //by byte basis so as not to advance too far in the increment step
++#if 1
++         fprintf(stderr, "section %d (%d/%s) randomized %ld bytes\n",
++                 isection->index,
++                 isection->id,
++                 isection->name,
++                 instr_randomized);
++#endif
++      }
++      /* maa2206 - ISR - END */
++
++
+@@ -3184,0 +3482,225 @@
++/* maa2206 - ISR - BEGIN */
++unsigned int
++readISRConfigFile(FILE* isr_cfg_file)
++{
++   FILE* fin = NULL;
++   int records = 0;
++   char* line = NULL;
++   size_t line_len = 0;
++   ssize_t chars_read = 0;
++
++   char* split_pos = NULL;
++   int splitter = '=';
++   char* param_key;
++   unsigned int param_key_length;
++   char* param_val;
++   unsigned int param_val_length;
++   char* trimmed_param_key = NULL;
++   char* trimmed_param_val = NULL;
++
++   char* function_name_key = "function_name";
++   char* start_address_key = "start_address";
++   char* end_address_key = "end_address";
++   char* isr_key_key = "isr_key";
++   char* tagnote_key = "tagnote";
++
++   unsigned int function_name_state = 0;
++   unsigned int start_addr_state = 0;
++   unsigned int end_addr_state = 0;
++   unsigned int isr_key_state = 0;
++   unsigned int tagnote_state = 0;
++
++   fin = isr_cfg_file;
++   if(NULL==fin)
++   {
++      perror("readISRConfigFile()");
++      return PARSE_FAILED;
++   }
++
++   while((records < MAX_SK_MAP_LENGTH) && 
++         (-1 != (chars_read = getline(&line, &line_len, fin)))
++         )
++   {
++      if(line[0]=='#')
++         continue; //skip comments
++      if(line[0]=='\n' && chars_read==1)
++         continue; //skip blank lines
++      //fprintf(stderr,"Retrieved line of length %zu :\n", chars_read);
++      //fprintf(stderr, "strlen(line) is %d (does not include NULL)\n", 
++      //        strlen(line));
++      fprintf(stderr, "%s", line);
++      //NOTE: 'line' is NULL-terminated and includes the \n
++      //strstr(&line, &splitter);
++      //strcspn(&line, "="); 
++      split_pos = index(line, splitter);
++      //determine how large param_key must be
++      param_key_length = (split_pos - line); //pointer arithmetic
++      //determine how large param_val must be
++      param_val_length = ((line+chars_read) - split_pos); //pointer math
++
++      //fprintf(stderr, "param_key_length is %d\n", param_key_length);
++      //fprintf(stderr, "param_val_length is %d\n", param_val_length);
++
++      //knock 1 off param_val_length b/c of terminator.
++      //newline will be knocked off by call to trim()
++      param_key = (char*)malloc(param_key_length+1);
++      if(NULL==param_key)
++      {
++         return PARSE_FAILED;
++      }
++      memcpy(param_key, line, param_key_length);
++      param_key[param_key_length] = '\0';
++
++      param_val = (char*)malloc(param_val_length+1);
++      if(NULL==param_val)
++      {
++         return PARSE_FAILED;
++      }
++      //only copy param_val_length-1 places because
++      //we need to skip the '=' symbol at the beginning
++      memcpy(param_val, split_pos+1, param_val_length-1);
++      param_val[param_val_length] = '\0';
++      param_val[param_val_length-1] = '\0';
++
++      //fprintf(stderr, "param_key: [%s]\n", param_key);
++      //fprintf(stderr, "param_val: [%s]\n", param_val);
++
++      //fprintf(stderr, "trimming...\n");
++
++      trimmed_param_key = trim(param_key);
++      trimmed_param_val = trim(param_val);
++
++      if(NULL==trimmed_param_key || NULL==trimmed_param_val)
++      {
++         return PARSE_FAILED;
++      }
++
++      //fprintf(stderr, "param_key: [%s]\n", trimmed_param_key);
++      //fprintf(stderr, "param_val: [%s]\n", trimmed_param_val);
++
++      if(0==strncmp(trimmed_param_key, function_name_key,
++                    strlen(function_name_key)))
++      {
++         if(!function_name_state && 
++            !start_addr_state && 
++            !end_addr_state &&
++            !isr_key_state &&
++            !tagnote_state)
++         {
++            function_name_state = 1;
++            //ignore trimmed_param_val
++            slice_keys[records].entry_num = records;
++         }else{
++            fprintf(stderr, 
++                    "Mangled config for entry %s/%s; expected function_name\n",
++                    trimmed_param_key, 
++                    trimmed_param_val);
++            return PARSE_FAILED;
++         }
++      }else if(0==strncmp(trimmed_param_key, start_address_key,
++                          strlen(start_address_key))){
++         if(function_name_state && 
++            !start_addr_state && 
++            !end_addr_state &&
++            !isr_key_state &&
++            !tagnote_state)
++         {
++            start_addr_state = 1;
++            slice_keys[records].start_address = strtol(trimmed_param_val,
++                                                       NULL,
++                                                       16);
++         }else{
++            fprintf(stderr, 
++                    "Mangled config for entry %s/%s; expected start_address\n",
++                    trimmed_param_key, 
++                    trimmed_param_val);
++            return PARSE_FAILED;
++         }
++      }else if(0==strncmp(trimmed_param_key, end_address_key,
++                          strlen(end_address_key))){
++         if(function_name_state && 
++            start_addr_state && 
++            !end_addr_state &&
++            !isr_key_state &&
++            !tagnote_state)
++         {
++            end_addr_state = 1;
++            slice_keys[records].end_address = strtol(trimmed_param_val,
++                                                     NULL,
++                                                     16);
++         }else{
++            fprintf(stderr, 
++                    "Mangled config for entry %s/%s; expected end_address\n",
++                    trimmed_param_key, 
++                    trimmed_param_val);
++            return PARSE_FAILED;
++         }
++      }else if(0==strncmp(trimmed_param_key, 
++                          isr_key_key,
++                          strlen(isr_key_key))){
++         if(function_name_state && 
++            start_addr_state && 
++            end_addr_state &&
++            !isr_key_state &&
++            !tagnote_state)
++         {
++            isr_key_state = 1;
++            slice_keys[records].isr_key = strtol(trimmed_param_val,
++                                                 NULL,
++                                                 16);
++         }else{
++            fprintf(stderr, 
++                    "Mangled config for entry %s/%s; expected isr_key\n",
++                    trimmed_param_key, 
++                    trimmed_param_val);
++            return PARSE_FAILED;
++         }
++      }else if(0==strncmp(trimmed_param_key, 
++                          tagnote_key,
++                          strlen(tagnote_key))){
++         if(function_name_state && 
++            start_addr_state && 
++            end_addr_state &&
++            isr_key_state &&
++            !tagnote_state)
++         {
++            tagnote_state = 1;
++            //ignore
++            ++records;
++            function_name_state = 0;
++            start_addr_state = 0;
++            end_addr_state = 0;
++            isr_key_state = 0;
++            tagnote_state = 0;
++         }else{
++            fprintf(stderr, 
++                    "Mangled config for entry %s/%s; expected tagnote\n",
++                    trimmed_param_key, 
++                    trimmed_param_val);
++            return PARSE_FAILED;
++         }
++      }else{
++         //unrecognized paramkey
++         fprintf(stderr, "Unrecognized configuration parameter: %s\n",
++                 trimmed_param_key);
++         return PARSE_FAILED;
++      }
++
++      free(param_key);
++      free(param_val);
++      param_key = NULL;
++      param_val = NULL;
++      free(trimmed_param_key);
++      free(trimmed_param_val);
++      trimmed_param_key = NULL;
++      trimmed_param_val = NULL;
++   }
++
++   if(line)
++      free(line);
++   line = NULL;
++   //fin is closed by caller
++   return PARSE_OK;
++}
++/* maa2206 - ISR - END */
++
+@@ -3800 +4322,38 @@
+-	
++	/* maa2206 - ISR - BEGIN */
++   case OPTION_ENC_XOR_KEY:
++      do
++      {
++         isr_encrypt_whole_image = 1; //true
++         if (strstr(optarg, "0x"))
++         {
++            //sscanf(optarg, "%x", &encrypt_xor_key);
++            encrypt_xor_key = strtol(optarg, NULL, 16);
++         }else{
++            encrypt_xor_key = (u_int16_t) atoi (optarg);
++         }
++      }while(0);
++      break;
++      /* locasto - support for selective ISR */
++      /* - gskc@03MAR03-1558 */
++
++      /* locasto - support for selective ISR */
++   case OPTION_ISR_CONF:
++      do
++      {
++         unsigned int read_config_result = 0;
++         isr_encrypt_whole_image = 0; //false
++         isr_configfile = fopen(optarg, "r");
++         read_config_result = readISRConfigFile(isr_configfile);
++         if(PARSE_FAILED==read_config_result)
++         {
++            fatal (_("parsing during readISRConfigFile() failed"));
++         }else if(PARSE_OK==read_config_result){
++            //fprintf(stdout, "Parsed objrand configuration file.\n");
++            //dumpSliceKeysTable();
++         }else{
++            fatal (_("unable to handle result from readISRConfigFile()"));
++         }
++         fclose(isr_configfile);
++      }while(0);
++      break;
++	/* maa2206 - ISR - END */
+@@ -3820 +4379,5 @@
+-  if (show_version)
++  if (show_version) {
++    /* maa2206 - ISR - BEGIN */
++    printf("NSL objrand %s\n", OBJRAND_VER_STRING);
++    printf("derived from:\n");
++    /* maa2206 - ISR - END */
+@@ -3821,0 +4385 @@
++  }

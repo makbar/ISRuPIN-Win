@@ -1,0 +1,24 @@
+\begin{thebibliography}{1}
+
+\bibitem{portokalidis2010fast}
+Portokalidis, G., Keromytis, A.:
+\newblock Fast and practical instruction-set randomization for commodity
+  systems.
+\newblock In: Proceedings of the 26th Annual Computer Security Applications
+  Conference, ACM (2010)  41--48
+
+\bibitem{luk2005pin}
+Luk, C., Cohn, R., Muth, R., Patil, H., Klauser, A., Lowney, G., Wallace, S.,
+  Reddi, V., Hazelwood, K.:
+\newblock Pin: building customized program analysis tools with dynamic
+  instrumentation.
+\newblock In: ACM SIGPLAN Notices. Volume~40., ACM (2005)  190--200
+
+\bibitem{economides2006linux}
+Economides, N., Katsamakas, E.:
+\newblock Linux vs. windows: A comparison of application and platform
+  innovation incentives for open source and proprietary software platforms.
+\newblock The Economics of Open Source Software Development, Elsevier
+  Publishers (2006)
+
+\end{thebibliography}
